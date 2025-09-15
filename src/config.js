@@ -1,0 +1,1 @@
+export const LOCATIONIQ_KEY='pk.8feeefef509b870a1ca2f0b3325d2bd5'
