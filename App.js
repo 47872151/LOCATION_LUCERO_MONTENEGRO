@@ -7,11 +7,12 @@ import MapView, { PROVIDER_GOOGLE, Marker } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
-import { LOCATIONIQ_KEY } from './src/config';
+import { LOCATIONIQ_KEY } from './src/config'; // 🔑 API Key de LocationIQ
 
-// Haversine
+
+// Fórmula de Haversine para calcular la distancia entre 2 puntos geográficos
 function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
-  const R = 6371;
+  const R = 6371; // radio de la Tierra en km
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
   const a =
@@ -19,16 +20,16 @@ function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
     Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
     Math.sin(dLon / 2) * Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
+  return R * c; // devuelve la distancia en kilómetros
 }
 
 export default function App() {
-  const [currentLocation, setCurrentLocation] = useState(null);
-  const [currentAddress, setCurrentAddress] = useState(null);
-  const [region, setRegion] = useState(null);
-  const mapRef = useRef(null);
+  const [currentLocation, setCurrentLocation] = useState(null); // ubicación actual (lat/lon)
+  const [currentAddress, setCurrentAddress] = useState(null);   // dirección en texto
+  const [region, setRegion] = useState(null);                   // región visible del mapa
+  const mapRef = useRef(null);                                  // referencia al mapa (para mover cámara)
 
-  // paleta
+  // Paleta de colores de la app
   const colors = {
     black: '#0a0908ff',
     gunmetal: '#22333bff',
@@ -37,34 +38,37 @@ export default function App() {
     walnutBrown: '#5e503fff',
   };
 
-  // ORIGEN
-  const [origin, setOrigin] = useState('');
-  const [originSuggestions, setOriginSuggestions] = useState([]);
-  const [loadingOrigin, setLoadingOrigin] = useState(false);
-  const [selectingOrigin, setSelectingOrigin] = useState(false);
-  const originTimeoutRef = useRef(null);
-  const [originCoord, setOriginCoord] = useState(null);
+  // ---------------------- ESTADOS DE ORIGEN ----------------------
+  const [origin, setOrigin] = useState('');                        // texto escrito en input de origen
+  const [originSuggestions, setOriginSuggestions] = useState([]);  // sugerencias de direcciones
+  const [loadingOrigin, setLoadingOrigin] = useState(false);       // loader mientras busca sugerencias
+  const [selectingOrigin, setSelectingOrigin] = useState(false);   // si el usuario está eligiendo origen
+  const originTimeoutRef = useRef(null);                           // referencia para timeout (debounce)
+  const [originCoord, setOriginCoord] = useState(null);            // coordenadas del origen seleccionado
 
-  // DESTINO
-  const [destination, setDestination] = useState('');
-  const [destinationSuggestions, setDestinationSuggestions] = useState([]);
-  const [loadingDestination, setLoadingDestination] = useState(false);
-  const destTimeoutRef = useRef(null);
-  const [destinationCoord, setDestinationCoord] = useState(null);
+  // ---------------------- ESTADOS DE DESTINO ----------------------
+  const [destination, setDestination] = useState('');                      // texto en input destino
+  const [destinationSuggestions, setDestinationSuggestions] = useState([]);// sugerencias destino
+  const [loadingDestination, setLoadingDestination] = useState(false);     // loader destino
+  const destTimeoutRef = useRef(null);                                     // timeout (debounce)
+  const [destinationCoord, setDestinationCoord] = useState(null);          // coordenadas destino
 
-  const [distance, setDistance] = useState(null);
+  // ---------------------- ESTADO DE DISTANCIA ----------------------
+  const [distance, setDistance] = useState(null); // distancia calculada entre origen y destino
 
-  // Obtener ubicación actual
+  // ---------------------- EFECTO: UBICACIÓN ACTUAL ----------------------
   useEffect(() => {
     (async () => {
       try {
+        // pedir permisos de ubicación
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') return;
 
+        // obtener coordenadas
         const location = await Location.getCurrentPositionAsync({});
         setCurrentLocation(location.coords);
 
-        // reverse geocoding
+        // obtener dirección en texto con reverse geocoding
         const res = await fetch(
           `https://us1.locationiq.com/v1/reverse.php?key=${LOCATIONIQ_KEY}&lat=${location.coords.latitude}&lon=${location.coords.longitude}&format=json`
         );
@@ -72,6 +76,7 @@ export default function App() {
         const addr = data.display_name || 'Ubicación actual';
         setCurrentAddress(addr);
 
+        // región inicial del mapa
         const initialRegion = {
           latitude: location.coords.latitude,
           longitude: location.coords.longitude,
@@ -80,7 +85,7 @@ export default function App() {
         };
         setRegion(initialRegion);
 
-        // inicializar ORIGEN en ubicación actual
+        // setear el origen como la ubicación actual
         setOriginCoord({
           latitude: initialRegion.latitude,
           longitude: initialRegion.longitude,
@@ -93,22 +98,25 @@ export default function App() {
     })();
   }, []);
 
-  // fetch ORIGEN
+  // ---------------------- FETCH SUGERENCIAS ORIGEN ----------------------
   const fetchOriginSuggestions = useCallback((text) => {
     setOrigin(text);
     setSelectingOrigin(true);
     if (originTimeoutRef.current) clearTimeout(originTimeoutRef.current);
 
+    // si escribe menos de 3 caracteres, no busca
     if (text.trim().length < 3) {
       setOriginSuggestions([]);
       return;
     }
 
+    // debounce: espera 300ms antes de consultar API
     originTimeoutRef.current = setTimeout(async () => {
       setLoadingOrigin(true);
       try {
         const lat = currentLocation?.latitude;
         const lon = currentLocation?.longitude;
+        // consulta a la API de LocationIQ para autocompletar
         const url = `https://api.locationiq.com/v1/autocomplete?key=${LOCATIONIQ_KEY}&q=${encodeURIComponent(text)}&limit=5&dedupe=1&normalizeaddress=1${lat && lon ? `&viewbox=${lon},${lat},${lon},${lat}&bounded=0` : ''}`;
         const res = await fetch(url);
         const data = await res.json();
@@ -121,6 +129,7 @@ export default function App() {
     }, 300);
   }, [currentLocation]);
 
+  // Seleccionar una sugerencia como ORIGEN
   const handleSelectOriginSuggestion = (item) => {
     setOrigin(item.display_name || '');
     setOriginSuggestions([]);
@@ -134,19 +143,19 @@ export default function App() {
     };
     setOriginCoord(coord);
 
-    // centrar mapa
+    // centrar mapa en nuevo origen
     const newRegion = { latitude: coord.latitude, longitude: coord.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 };
     setRegion(newRegion);
     if (mapRef.current) mapRef.current.animateToRegion(newRegion, 800);
 
-    // recalcular distancia si hay destino
+    // recalcular distancia si ya hay destino
     if (destinationCoord) {
       const d = getDistanceFromLatLonInKm(coord.latitude, coord.longitude, destinationCoord.latitude, destinationCoord.longitude);
       setDistance(d);
     }
   };
 
-  // fetch DESTINO
+  // ---------------------- FETCH SUGERENCIAS DESTINO ----------------------
   const fetchDestinationSuggestions = useCallback((text) => {
     setDestination(text);
     if (destTimeoutRef.current) clearTimeout(destTimeoutRef.current);
@@ -173,6 +182,7 @@ export default function App() {
     }, 300);
   }, [currentLocation]);
 
+  // Seleccionar sugerencia como DESTINO
   const handleSelectDestinationSuggestion = (item) => {
     setDestination(item.display_name || '');
     setDestinationSuggestions([]);
@@ -185,19 +195,19 @@ export default function App() {
     };
     setDestinationCoord(coord);
 
-    // centrar mapa ligeramente hacia destino
+    // centrar mapa en destino
     const newRegion = { latitude: coord.latitude, longitude: coord.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 };
     setRegion(newRegion);
     if (mapRef.current) mapRef.current.animateToRegion(newRegion, 800);
 
-    // calcular distancia si hay origen
+    // calcular distancia si ya hay origen
     if (originCoord) {
       const d = getDistanceFromLatLonInKm(originCoord.latitude, originCoord.longitude, coord.latitude, coord.longitude);
       setDistance(d);
     }
   };
 
-  // Usar ubicación actual (botón superior)
+  // ---------------------- USAR UBICACIÓN ACTUAL COMO ORIGEN ----------------------
   const useCurrentLocationAsOrigin = () => {
     if (!currentLocation) return;
     const coord = {
@@ -214,14 +224,13 @@ export default function App() {
     setRegion(newRegion);
     if (mapRef.current) mapRef.current.animateToRegion(newRegion, 800);
 
-    // recalcular distancia si hay destino
     if (destinationCoord) {
       const d = getDistanceFromLatLonInKm(coord.latitude, coord.longitude, destinationCoord.latitude, destinationCoord.longitude);
       setDistance(d);
     }
   };
 
-  // Botón flotante para centrar en mi ubicación
+  // ---------------------- BOTÓN FLOTE PARA CENTRAR EN UBICACIÓN ----------------------
   const centerOnCurrentLocation = () => {
     if (!currentLocation || !mapRef.current) {
       alert('No se pudo obtener tu ubicación actual. Activa la ubicación e intenta de nuevo.');
@@ -246,7 +255,7 @@ export default function App() {
     <SafeAreaView style={[styles.main, { backgroundColor: colors.almond }]}>
       <StatusBar barStyle="dark-content" backgroundColor={colors.almond} translucent={true} />
 
-      {/* Header: usar ubicación actual (como en tu primer ejemplo) */}
+      {/* Header con opción para usar ubicación actual */}
       <TouchableOpacity
         style={{ backgroundColor: 'transparent', flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', marginRight: 20, marginTop: 20, marginBottom: -15 }}
         onPress={useCurrentLocationAsOrigin}
@@ -257,6 +266,7 @@ export default function App() {
         </View>
       </TouchableOpacity>
 
+      {/* Mapa con markers */}
       <View style={[styles.mapaContainer, { backgroundColor: colors.almond }]}> 
         <View style={styles.mapaWrapper}> 
           <MapView
@@ -269,6 +279,7 @@ export default function App() {
             showsPointsOfInterest
             mapType="standard"
           >
+            {/* Marker origen */}
             {originCoord && (
               <Marker
                 coordinate={{ latitude: originCoord.latitude, longitude: originCoord.longitude }}
@@ -277,6 +288,7 @@ export default function App() {
               />
             )}
 
+            {/* Marker destino */}
             {destinationCoord && (
               <Marker
                 coordinate={{ latitude: destinationCoord.latitude, longitude: destinationCoord.longitude }}
@@ -287,11 +299,12 @@ export default function App() {
           </MapView>
         </View>
 
+        {/* Flecha decorativa */}
         <View style={styles.arrowDown}>
           <MaterialIcons name="keyboard-arrow-down" size={32} color={colors.khaki} />
         </View>
 
-        {/* Botón flotante para centrar ubicación actual (como lo tenías antes) */}
+        {/* Botón flotante para volver a ubicación actual */}
         <TouchableOpacity
           style={[styles.locationButton, { backgroundColor: colors.almond, borderColor: colors.walnutBrown }]}
           onPress={centerOnCurrentLocation}
@@ -300,7 +313,7 @@ export default function App() {
         </TouchableOpacity>
       </View>
 
-      {/* Mostrar distancia si existe */}
+      {/* Distancia entre origen y destino */}
       {distance !== null && (
         <View style={{ alignItems: 'center', marginTop: 10 }}>
           <Text style={{ color: colors.black, fontSize: 16 }}>
@@ -309,7 +322,7 @@ export default function App() {
         </View>
       )}
 
-      {/* Inputs */}
+      {/* Inputs de búsqueda */}
       <View style={styles.searchContainer}>
         {/* ORIGEN */}
         <View style={[styles.inputContainer, { backgroundColor: colors.almond, borderColor: colors.walnutBrown }]}> 
@@ -325,6 +338,7 @@ export default function App() {
           {loadingOrigin && <ActivityIndicator size="small" color={colors.khaki} />}
         </View>
 
+        {/* Lista de sugerencias origen */}
         {selectingOrigin && originSuggestions.length > 0 && (
           <ScrollView style={[styles.suggestionsContainer, { backgroundColor: colors.almond }]} keyboardShouldPersistTaps="handled">
             {originSuggestions.map((item, idx) => (
@@ -348,6 +362,7 @@ export default function App() {
           {loadingDestination && <ActivityIndicator size="small" color={colors.walnutBrown} />}
         </View>
 
+        {/* Lista de sugerencias destino */}
         {destinationSuggestions.length > 0 && (
           <ScrollView style={[styles.suggestionsContainer, { backgroundColor: colors.almond }]} keyboardShouldPersistTaps="handled">
             {destinationSuggestions.map((item, idx) => (
@@ -362,6 +377,7 @@ export default function App() {
   );
 }
 
+// ---------------------- ESTILOS ----------------------
 const styles = StyleSheet.create({
   main: { flex: 1, width: '100%' },
   mapaContainer: {
@@ -416,10 +432,4 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-    zIndex: 1000,
-  },
-  ubicacionActual: { fontWeight: 'bold', backgroundColor: 'transparent' }
-});
+    shadowOpacity: 0.
